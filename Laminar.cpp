@@ -64,6 +64,9 @@ constexpr int kGpuLeaseMs = 250;
 constexpr const char* kGpuMinFreqPath = "/sys/class/kgsl/kgsl-3d0/devfreq/min_freq";
 // The vote lasts only while frames keep being reported
 constexpr int kExpensiveRenderingLeaseMs = 100;
+// Vote only for a stream of blurred frames. Single composites, like the ones region sampling
+// causes a few times a second on an idle screen, are not worth a GPU floor.
+constexpr auto kExpensiveStreamGap = std::chrono::milliseconds(50);
 // Input events renew the touch vote about every 100 ms while a finger is down
 constexpr int kInteractionGpuLeaseMs = 150;
 
@@ -212,6 +215,7 @@ void setGpuVote(const void* owner, int step, int leaseMs = kGpuLeaseMs) {
 
 const int gExpensiveRenderingOwner = 0;
 std::atomic<bool> gExpensiveRendering = false;
+std::atomic<int64_t> gLastExpensiveFrameNs = 0;
 const int gInteractionOwner = 0;
 
 }  // namespace
@@ -256,7 +260,7 @@ bool LaminarController::enabled() {
 // Sent just before SurfaceFlinger composes blur or a color conversion on the GPU
 void LaminarController::setExpensiveRendering(bool expected) {
     gExpensiveRendering = expected;
-    setGpuVote(&gExpensiveRenderingOwner, expected ? 1 : 0, kExpensiveRenderingLeaseMs);
+    if (!expected) setGpuVote(&gExpensiveRenderingOwner, 0);
 }
 
 void LaminarController::interaction(int32_t durationMs) {
@@ -279,7 +283,12 @@ void LaminarController::setTarget(int64_t targetNanos) {
 
 void LaminarController::report(int64_t actualNanos, int64_t cpuNanos, int64_t gpuNanos) {
     if (gExpensiveRendering) {
-        setGpuVote(&gExpensiveRenderingOwner, 1, kExpensiveRenderingLeaseMs);
+        const int64_t now = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+        const int64_t last = gLastExpensiveFrameNs.exchange(now);
+        if (now - last < std::chrono::nanoseconds(kExpensiveStreamGap).count()) {
+            setGpuVote(&gExpensiveRenderingOwner, 1, kExpensiveRenderingLeaseMs);
+        }
     }
     {
         std::lock_guard<std::mutex> lock(mLock);
