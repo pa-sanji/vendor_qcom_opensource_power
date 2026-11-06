@@ -64,6 +64,8 @@ constexpr int kGpuLeaseMs = 250;
 constexpr const char* kGpuMinFreqPath = "/sys/class/kgsl/kgsl-3d0/devfreq/min_freq";
 // The vote lasts only while frames keep being reported
 constexpr int kExpensiveRenderingLeaseMs = 100;
+// Input events renew the touch vote about every 100 ms while a finger is down
+constexpr int kInteractionGpuLeaseMs = 150;
 
 // Discover supported levels once; only floor transitions write sysfs afterward.
 const std::vector<int64_t>& gpuStepsHz() {
@@ -210,6 +212,7 @@ void setGpuVote(const void* owner, int step, int leaseMs = kGpuLeaseMs) {
 
 const int gExpensiveRenderingOwner = 0;
 std::atomic<bool> gExpensiveRendering = false;
+const int gInteractionOwner = 0;
 
 }  // namespace
 
@@ -256,6 +259,10 @@ void LaminarController::setExpensiveRendering(bool expected) {
     setGpuVote(&gExpensiveRenderingOwner, expected ? 1 : 0, kExpensiveRenderingLeaseMs);
 }
 
+void LaminarController::interaction(int32_t durationMs) {
+    setGpuVote(&gInteractionOwner, 1, std::max(durationMs, kInteractionGpuLeaseMs));
+}
+
 void LaminarController::setThreads(const std::vector<int32_t>& threads) {
     std::lock_guard<std::mutex> lock(mLock);
     int floor = mApplied;
@@ -276,6 +283,12 @@ void LaminarController::report(int64_t actualNanos, int64_t cpuNanos, int64_t gp
     }
     {
         std::lock_guard<std::mutex> lock(mLock);
+        // First frame after the session went idle. Sessions that send no CPU_LOAD_RESET, like
+        // SurfaceFlinger's, start from the last burst's floor here like rebaseline() does.
+        if (mFloor == 0 && mBurstPeak == 0 && mLastBurstPeak > 0 &&
+            std::chrono::steady_clock::now() - mLastBurstEnd < kBurstMemory) {
+            mFloor = std::min(kCeiling, mLastBurstPeak * 3 / 4);
+        }
         // The utilization floor only helps the CPU part of the work. When the session reports the
         // split, GPU bound frames must not raise it.
         const int64_t cpuWork = cpuNanos > 0 ? cpuNanos : actualNanos;

@@ -22,6 +22,9 @@ class LaminarController {
 
     static bool enabled();
     static void setExpensiveRendering(bool expected);
+    // Touch input: hold a GPU floor briefly so the first frames of a gesture do not wait for the
+    // GPU clock to ramp up.
+    static void interaction(int32_t durationMs);
 
     void setThreads(const std::vector<int32_t>& threads);
     void setTarget(int64_t targetNanos);
