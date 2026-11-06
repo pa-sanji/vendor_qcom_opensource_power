@@ -76,6 +76,9 @@
 #ifdef MODE_EXT
 extern bool isDeviceSpecificModeSupported(Mode type, bool* _aidl_return);
 extern bool setDeviceSpecificMode(Mode type, bool enabled);
+// Optional, only extensions that handle boosts define them
+extern bool isDeviceSpecificBoostSupported(Boost type, bool* _aidl_return) __attribute__((weak));
+extern bool setDeviceSpecificBoost(Boost type, int32_t durationMs) __attribute__((weak));
 #endif
 
  namespace aidl {
@@ -159,14 +162,30 @@ extern bool setDeviceSpecificMode(Mode type, bool enabled);
  }
 
  ndk::ScopedAStatus Power::setBoost(Boost type, int32_t durationMs) {
-     LOG(INFO) << "Power setBoost: " << static_cast<int32_t>(type)
-                 << ", duration: " << durationMs;
+#ifdef MODE_EXT
+    if (setDeviceSpecificBoost) setDeviceSpecificBoost(type, durationMs);
+#endif
+     switch (type) {
+         case Boost::INTERACTION:
+             // Sent for every batch of input events, so not logged
+             LaminarController::interaction(durationMs);
+             break;
+         default:
+             LOG(INFO) << "Power setBoost: " << static_cast<int32_t>(type)
+                       << ", duration: " << durationMs;
+             break;
+     }
      return ndk::ScopedAStatus::ok();
  }
 
  ndk::ScopedAStatus Power::isBoostSupported(Boost type, bool* _aidl_return) {
      LOG(INFO) << "Power isBoostSupported: " << static_cast<int32_t>(type);
-     *_aidl_return = false;
+#ifdef MODE_EXT
+    if (isDeviceSpecificBoostSupported && isDeviceSpecificBoostSupported(type, _aidl_return)) {
+        return ndk::ScopedAStatus::ok();
+    }
+#endif
+     *_aidl_return = type == Boost::INTERACTION;
      return ndk::ScopedAStatus::ok();
  }
 
