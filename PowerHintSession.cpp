@@ -203,7 +203,7 @@ bool initTopAppInfo(std::string &topAppName) {
 void initSupportedFps(std::vector<int32_t> &supportedFps) {
     ndk::SpAIBinder binder(AServiceManager_checkService("vendor.qti.hardware.display.config.IDisplayConfig/default"));
     if(binder.get() == nullptr) {
-        LOG(ERROR) << "DisplayConfig AIDL is not available";
+        LOG(INFO) << "DisplayConfig AIDL is not available";
         return;
     }
     auto aidlDisplayConfigIntf = IDisplayConfig::fromBinder(binder);
